@@ -2,7 +2,6 @@
 
 import sys
 import json
-import pyotp
 import socket
 import select
 from time import time
@@ -14,7 +13,6 @@ from client import SocketClient
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = config.SECRET_KEY
-hotp = pyotp.HOTP(app.config["SECRET_KEY"])
 socketio = SocketIO(app)
 
 services = config.SERVICES["websockets"]
