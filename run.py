@@ -15,10 +15,12 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = config.SECRET_KEY
 socketio = SocketIO(app)
 
-services = config.SERVICES["websockets"]
-
+http_ports = config.SERVICES["http"]
 sock_ports = config.SERVICES["sockets"]
-app.config["SOCK"] = SocketClient("127.0.0.1", sock_ports["txdispatch"])
+websock_ports = config.SERVICES["websockets"]
+
+app.config["SOCK"] = SocketClient("127.0.0.1", sock_ports["txdispatch"],
+                        ports=config.SERVICES)
 
 # type: obj -> str
 def encode(data):
@@ -30,15 +32,25 @@ def decode(data):
 
 @socketio.on("message")
 def handle_message(message):
-    print("[%s]> %s" % (time(), message))
+    print("Message: [%s]> %s" % (time(), message))
 
 @socketio.on("json")
 def handle_json(json):
-    print("[%s]> %s" % (time(), encode(json)))
+    print("JSON: [%s]> %s" % (time(), encode(json)))
+
+@socketio.on("socket")
+def handle_socket(socket):
+    print("Socket: [%s]> %s" % (time(), encode(socket)))
+    name = socket.get("name", None)
+    data = socket.get("data", None)
+    owner = socket.get("owner", None)
+    
+    if owner is not None:
+        emit("message", data, room=owner)
 
 @socketio.on("connected")
 def handle_connected(hello):
-    print("[%s]> %s" % (time(), encode(hello)))
+    print("Connected: [%s]> %s" % (time(), encode(hello)))
     json = {
         "data": "Welcome to TxDispatch!"
     }
@@ -46,19 +58,19 @@ def handle_connected(hello):
 
 @socketio.on("request")
 def handle_request(req):
-    print("[%s]> %s" % (time(), encode(req)))
+    print("Request: [%s]> %s" % (time(), encode(req)))
     name = req.get("name", None)
     data = req.get("data", None)
     
     if name is not None and data is not None:
-        if name in list(services.keys()):
+        if name in list(websock_ports.keys()):
             ns = "/%s" % name
             dispatch = {
                 "name": name,
                 "data": data
             }
             dispatch["owner"] = request.sid
-            handle_service_request(dispatch)
+            handle_service_request(dispatch, namespace="/%s" % name)
         else:
             err = {
                 "name": "error",
@@ -78,17 +90,23 @@ def handle_request(req):
         }
         emit("error", err)
 
-def handle_service_connected(hello):
-    ns = request.namespace
-    print("%s@[%s]> %s" % (ns[1:], time(), str(hello)))
+def handle_service_connected(hello, namespace=None):
+    if namespace is None:
+        ns = request.namespace
+    else:
+        ns = namespace
+    print("SConnected: %s@[%s]> %s" % (ns[1:], time(), str(hello)))
     json = {
         "data": "Welcome to %s!" % ns[1:]
     }
     emit("connected", json, namespace=ns)
     
-def handle_service_request(req):
-    _ns = request.namespace
-    print("%s@[%s]> %s" % (_ns[1:], time(), encode(req)))
+def handle_service_request(req, namespace=None):
+    if namespace is None:
+        ns = request.namespace
+    else:
+        ns = namespace
+    print("SRequest: %s@[%s]> %s" % (ns[1:], time(), encode(req)))
     name = req.get("name", None)
     data = req.get("data", None)
     sock = app.config["SOCK"]
@@ -106,13 +124,38 @@ def handle_service_request(req):
             }
         }
         emit("error", err)
+
+def handle_service_message(message, namespace=None):
+    if namespace is None:
+        ns = request.namespace
+    else:
+        ns = namespace
+    print("SMessage: %s@[%s]> %s" % (ns[1:], time(), encode(message)))
+    name = message.get("name", None)
+    data = message.get("data", None)
     
-for service, port in services.items():
+    if name is not None and data is not None:
+        if "owner" in data:
+            owner = data["owner"]
+            del data["owner"]
+            emit("message", data, room=owner)
+    else:
+        err = {
+            "name": "error",
+            "data": {
+                "code": "0x0002",
+                "message": "Missing name or data"
+            }
+        }
+        emit("error", err)
+    
+for service, port in websock_ports.items():
     ns = "/%s" % service
     socketio.on_event("connected", handle_service_connected, namespace=ns)
     socketio.on_event("request", handle_service_request, namespace=ns)
+    socketio.on_event("message", handle_service_message, namespace=ns)
 
 if __name__ == "__main__":
     app.config["SOCK"].start()
-    socketio.run(app, host="localhost", port=services["txdispatch"])
+    socketio.run(app, host="localhost", port=websock_ports["txdispatch"])
     #, debug=True)

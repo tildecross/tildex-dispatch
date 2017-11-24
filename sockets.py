@@ -93,10 +93,10 @@ class SocketServer(threading.Thread):
         while self.running:
             try:
                 # Timeout every 60 seconds
-                selection = select.select(self.connections, [], [], 60)
+                selection = select.select(self.connections, [], [], 5)
                 read_sock, write_sock, error_sock = selection
-            except socket.error:
-                continue
+            except select.error:
+                print("Error!!!")
             else:
                 for sock in read_sock:
                     # New connection
@@ -105,6 +105,7 @@ class SocketServer(threading.Thread):
                             accept_sock = self.server_socket.accept()
                             client_socket, client_address = accept_sock
                         except socket.error:
+                            print("Other error!")
                             break
                         else:
                             self.connections.append(client_socket)
@@ -127,13 +128,14 @@ class SocketServer(threading.Thread):
                             data = self._receive(sock)
                             if data:
                                 print(decode(data))
-                                self._send(sock, encode({
-                                    "name": "message",
-                                    "data": {
-                                        "name": sock.getpeername(),
-                                        "data": data
-                                    }
-                                }))
+                                self._send(sock, data)
+                                #     "name": "message",
+                                #     "data": data
+                                #     # {
+                                #     #     "name": sock.getpeername(),
+                                #     #     "data": data
+                                #     # }
+                                # }))
                         except socket.error:
                             # Client is no longer replying
                             self._broadcast(sock, encode({
